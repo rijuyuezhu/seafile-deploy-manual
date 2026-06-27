@@ -1,11 +1,15 @@
-# Migrating from a school Seafile service
+# 从学校 Seafile 迁移
 
-1. In the old school Seafile client, make sure every library is fully synced locally.
-2. Check there are no conflict files or placeholder-only files.
-3. Create matching libraries on your self-hosted Seafile.
-4. Upload or re-sync libraries in batches.
-5. Reconfigure desktop/mobile clients to use `https://cloud.example.com`.
-6. Reconfigure WebDAV clients to use `https://cloud.example.com/seafdav/`.
-7. Regenerate public share links on the new server.
+推荐先用客户端迁移，步骤相对直观：
 
-A `401 Unauthorized` response from `/seafdav/` usually means the WebDAV endpoint is alive and waiting for authentication.
+1. 在旧的学校 Seafile 客户端里确认每个资料库都已经完整同步到本地。
+2. 检查是否有冲突文件、占位文件或还没下载完成的大文件。
+3. 在自建 Seafile 上创建对应资料库。
+4. 分批上传或重新同步资料库，先从小资料库开始。
+5. 把桌面端和手机端切换到 `https://cloud.example.com`。
+6. 把 WebDAV 客户端切换到 `https://cloud.example.com/seafdav/`。
+7. 在新服务器上重新生成需要继续使用的分享链接。
+
+客户端迁移主要迁移文件内容，不会自动保留学校服务器上的版本历史、资料库权限、群组设置和旧分享链接。加密资料库迁移前要确认本地能正常解密和读取。
+
+未登录访问 `/seafdav/` 时看到 `401 Unauthorized` 通常是正常的，说明 WebDAV 入口存在并在等待认证。

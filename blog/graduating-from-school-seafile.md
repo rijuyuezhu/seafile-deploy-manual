@@ -110,6 +110,12 @@ chmod 755 "$DEPLOY/data/shared"
 
 ## 0x03 配置 `.env`
 
+如果是新开的终端，先重新设置部署目录变量：
+
+```bash
+export DEPLOY=/opt/seafile-deploy
+```
+
 编辑 `/opt/seafile-deploy/.env`：
 
 ```bash
@@ -131,6 +137,7 @@ SEAFILE_ADMIN_PASSWORD=change-me-long-random-password
 如果后面改过 `.env` 里的域名或协议，需要重新创建 Seafile 容器让配置生效：
 
 ```bash
+export DEPLOY=/opt/seafile-deploy
 cd "$DEPLOY"
 docker compose --env-file .env up -d --force-recreate seafile
 ```
@@ -146,13 +153,42 @@ openssl rand -base64 32
 仓库里有安装 Docker 的脚本。进入部署目录后执行：
 
 ```bash
+export DEPLOY=/opt/seafile-deploy
 cd "$DEPLOY"
 bash scripts/install-docker.sh
 ```
 
-如果脚本提示需要把当前用户加入 docker 组，执行提示里的命令，然后重新登录。之后启动 Seafile：
+如果安装脚本在下载 Docker 时失败，先检查这两个地址是否能访问：
 
 ```bash
+curl -I https://get.docker.com
+curl -I https://download.docker.com/linux/ubuntu/gpg
+```
+
+如果网络受限，需要先配置代理或可用的软件源，再重新执行安装脚本。
+
+安装后先确认当前用户能直接使用 Docker：
+
+```bash
+docker info >/dev/null
+```
+
+如果这里提示 permission denied，执行：
+
+```bash
+sudo usermod -aG docker "$USER"
+```
+
+然后退出重新登录，或者临时执行：
+
+```bash
+newgrp docker
+```
+
+再次确认 `docker info >/dev/null` 成功后，再启动 Seafile：
+
+```bash
+export DEPLOY=/opt/seafile-deploy
 cd "$DEPLOY"
 bash scripts/deploy.sh
 ```
@@ -171,8 +207,22 @@ curl -I http://127.0.0.1:8080/
 如果你之前在学校 Seafile 上用过 WebDAV，迁移后通常也会继续使用。Seafile 的 WebDAV 配置文件在数据目录里，第一次启动容器后才会生成：
 
 ```bash
+export DEPLOY=/opt/seafile-deploy
 cd "$DEPLOY"
 WEBDAV_CONF="$DEPLOY/data/shared/seafile/conf/seafdav.conf"
+
+for i in {1..60}; do
+  if [[ -f "$WEBDAV_CONF" ]]; then
+    break
+  fi
+  sleep 5
+done
+
+if [[ ! -f "$WEBDAV_CONF" ]]; then
+  docker compose --env-file .env logs --tail=80 seafile
+  exit 1
+fi
+
 ls -l "$WEBDAV_CONF"
 ```
 
@@ -208,6 +258,7 @@ curl -I http://127.0.0.1:8080/seafdav/
 把它复制到 Nginx 配置目录：
 
 ```bash
+export DEPLOY=/opt/seafile-deploy
 sudo cp "$DEPLOY/nginx/seafile-cloudflare-tunnel.conf.example" /etc/nginx/conf.d/seafile-cloud.conf
 sudo vim /etc/nginx/conf.d/seafile-cloud.conf
 ```
@@ -247,15 +298,18 @@ tailscale ip -4
 
 最简单的用法是通过 Tailscale SSH 或 Tailscale IP 维护这台机器。这样即使公网入口不可用，也能进入旧电脑查看 Docker、Nginx 和 cloudflared 状态。
 
-如果希望浏览器也通过 Tailscale 直接访问 Seafile，可以准备一个内部域名，例如 `cloud.internal.example.com`，指向旧电脑的 Tailscale IP。仓库里提供了内部 HTTPS 模板：
+如果希望浏览器也通过 Tailscale 直接访问 Seafile，可以准备一个内部域名，例如 `cloud.internal.example.com`，指向旧电脑的 Tailscale IP。这里可以先不做；对多数个人部署来说，Tailscale 作为维护通道已经足够。
+
+仓库里提供了内部 HTTPS 模板：
 
 ```text
 /opt/seafile-deploy/nginx/seafile-tailscale-https.conf.example
 ```
 
-复制后再修改 server name 和证书路径：
+复制后再修改 server name 和证书路径。这个模板假定你已经准备好了内部域名的 HTTPS 证书；如果没有证书，不要直接启用它，可以继续只把 Tailscale 当维护通道。
 
 ```bash
+export DEPLOY=/opt/seafile-deploy
 sudo cp "$DEPLOY/nginx/seafile-tailscale-https.conf.example" /etc/nginx/conf.d/seafile-internal.conf
 sudo vim /etc/nginx/conf.d/seafile-internal.conf
 sudo nginx -t
@@ -307,6 +361,8 @@ curl -I https://cloud.example.com/seafdav/
 
 迁移数据时，我使用客户端迁移。先在学校 Seafile 客户端里确认所有资料库都完整同步到本地，尤其是大文件、加密资料库和很久没打开过的目录。确认本地数据完整后，再在新的自建 Seafile 里创建对应资料库，并分批上传或重新同步。
 
+客户端迁移主要迁移文件内容，不会自动保留学校服务器上的版本历史、资料库权限、群组设置和旧分享链接。加密资料库迁移前也要确认本地能正常解密和读取。
+
 可以先迁移小资料库，确认网页端、桌面客户端和手机端都正常，再迁移论文资料、课程资料、代码、照片和实验数据。迁移过程中如果出现冲突文件，也比较容易定位。
 
 桌面客户端和手机客户端都需要重新添加服务器地址：
@@ -330,14 +386,15 @@ https://cloud.example.com/seafdav/
 仓库里提供了一个简单检查脚本：
 
 ```bash
+export DEPLOY=/opt/seafile-deploy
 cd "$DEPLOY"
 bash scripts/check.sh
 ```
 
-脚本里的示例 Host 是 `cloud.example.com`。如果你已经换成自己的域名，可以直接编辑 `scripts/check.sh`，或者手动运行：
+检查脚本会优先读取 `.env` 里的 `SEAFILE_SERVER_HOSTNAME`。如果临时想用别的 Host 测试，也可以这样运行：
 
 ```bash
-curl -I -H 'Host: your-domain.example' http://127.0.0.1/
+HOST=your-domain.example bash scripts/check.sh
 ```
 
 备份至少要覆盖两个目录：
@@ -356,6 +413,7 @@ curl -I -H 'Host: your-domain.example' http://127.0.0.1/
 对应命令如下：
 
 ```bash
+export DEPLOY=/opt/seafile-deploy
 cd "$DEPLOY"
 docker compose --env-file .env ps
 curl -I http://127.0.0.1:8080/
@@ -397,6 +455,10 @@ sudo journalctl -u cloudflared -n 100 --no-pager
 如果浏览器提示重定向过多，一般是 Cloudflare Tunnel 访问本机 HTTP，而 Nginx 又把这个 HTTP 请求跳回 HTTPS。对同机部署来说，可以让公网域名的 80 server block 直接反代到 Seafile，并在反代头里保留 `X-Forwarded-Proto https`。
 
 如果日志里出现证书和 `localhost` 不匹配，通常是 Tunnel 被配置成了 HTTPS origin，但本机证书没有签给 `localhost`。可以把 Tunnel origin 改成 `http://127.0.0.1`，让 Cloudflare 处理公网侧 HTTPS，本机只处理 localhost HTTP。
+
+Docker 安装脚本如果下载失败，先分别检查 `https://get.docker.com` 和 `https://download.docker.com/linux/ubuntu/gpg`。这类问题通常是网络、代理或 Docker 软件源访问问题。
+
+如果 `docker info` 报 permission denied，说明当前用户还不能访问 Docker daemon。把用户加入 docker 组后，需要重新登录，或者先用 `newgrp docker` 开一个新的 shell。
 
 WebDAV 方面，访问 `/seafdav/` 时看到 `401 Unauthorized` 往往是正常的，因为它在等待客户端认证。需要继续排查的是 404、502 或连接超时。
 

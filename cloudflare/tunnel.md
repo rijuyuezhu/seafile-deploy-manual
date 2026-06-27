@@ -1,6 +1,6 @@
 # Cloudflare Tunnel
 
-Recommended setup:
+推荐的 Public Hostname 配置：
 
 ```text
 Hostname: cloud.example.com
@@ -8,36 +8,36 @@ Service Type: HTTP
 Service URL: http://127.0.0.1
 ```
 
-Why HTTP origin is acceptable here:
+这里 origin 使用 HTTP 是可以接受的，因为链路实际是：
 
 ```text
-Browser -> Cloudflare: HTTPS
-Cloudflare -> cloudflared: encrypted tunnel
-cloudflared -> local Nginx: localhost HTTP
+浏览器 -> Cloudflare: HTTPS
+Cloudflare -> cloudflared: 加密 tunnel
+cloudflared -> 本机 Nginx: localhost HTTP
 ```
 
-This avoids local certificate mismatch errors such as:
+这样可以避开本机证书和 `localhost` 不匹配的问题，例如：
 
 ```text
 x509: certificate is valid for *.example.com, not localhost
 ```
 
-## Steps
+## 步骤
 
-1. Add your domain to Cloudflare DNS.
-2. Create a Zero Trust Tunnel.
-3. Install and run `cloudflared` using the command shown in the dashboard.
-4. Add a Public Hostname:
+1. 把域名接入 Cloudflare DNS。
+2. 在 Cloudflare Zero Trust 创建 Tunnel。
+3. 按 Dashboard 给出的命令安装并运行 `cloudflared`。
+4. 添加 Public Hostname：
    - Hostname: `cloud.example.com`
    - Service: `http://127.0.0.1`
-5. Configure local Nginx using `nginx/seafile-cloudflare-tunnel.conf.example`.
-6. Test:
+5. 本机 Nginx 使用 `nginx/seafile-cloudflare-tunnel.conf.example`。
+6. 测试：
 
 ```bash
 curl -I https://cloud.example.com/
 ```
 
-Expected:
+预期会看到 Cloudflare 响应头，以及 Seafile 登录页的跳转：
 
 ```text
 HTTP/2 302
@@ -45,6 +45,4 @@ location: /accounts/login/?next=/
 server: cloudflare
 ```
 
-## Notes
-
-Do not paste Cloudflare tunnel tokens into public issues, blog posts, or commits.
+不要把 Cloudflare tunnel token 贴到公开 issue、博客或 commit 里。

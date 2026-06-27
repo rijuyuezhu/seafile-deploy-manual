@@ -1,23 +1,23 @@
-# Backup notes
+# 备份说明
 
-Seafile is a sync service, not a complete backup strategy.
+Seafile 是同步服务，不等于完整备份。客户端误删、数据库损坏、硬盘故障和勒索软件都可能把问题同步到多台设备上。
 
-Back up at least:
+至少要备份这些内容：
 
 ```text
 ./data/mysql
 ./data/shared
-.env or a secure secret backup
-Nginx configuration
-Cloudflare/Tailscale documentation
+.env 的安全副本
+Nginx 配置
+Cloudflare/Tailscale 的配置记录
 ```
 
-Do not store the only backup on the same old SSD.
-
-Suggested schedule:
+不要把唯一备份放在同一块旧硬盘或同一台旧电脑上。更稳妥的做法是：
 
 ```text
-Daily local snapshot
-Weekly off-machine backup
-Cold backup for critical documents
+每天做本机快照
+每周备份到另一台机器或另一块硬盘
+特别重要的文档保留离线冷备份
 ```
+
+仓库里的 `scripts/backup.sh` 只打包模板和说明，方便保存部署配置，不会备份真实的 Seafile 数据和数据库。
