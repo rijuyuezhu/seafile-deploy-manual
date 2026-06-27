@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+data/
+backups/
+*.pem
+*.key
+*.crt
+*.p12
+*.sqlite
+*.db
+*.sql
+*.sql.gz
+cloudflared-token*
+.DS_Store
