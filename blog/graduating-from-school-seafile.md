@@ -45,7 +45,7 @@
     └── shared/
 ```
 
-`stack` 里放可以版本管理的配置模板和脚本，`data` 里放数据库和 Seafile 的实际文件数据。后面如果把安装过程固化成 GitHub 仓库，也应该只提交模板和说明，而不是提交运行中的数据目录。
+`stack` 里放可以版本管理的配置模板和脚本，`data` 里放数据库和 Seafile 的实际文件数据。这个仓库也是按这个思路整理的：文章、Compose 文件、Nginx 示例和辅助脚本放在一起，真正运行时产生的数据留在部署机器上。
 
 ## 用 Docker Compose 安装 Seafile
 
@@ -202,11 +202,11 @@ SEAFILE_SERVER_HOSTNAME=cloud.example.com
 SEAFILE_SERVER_PROTOCOL=https
 ```
 
-## 把过程固化成仓库
+## 这个仓库里有什么
 
-这次部署之后，我把配置模板和说明整理成了一个小仓库。仓库不试图替代官方文档，而是记录一条适合个人毕业迁移的路径：旧电脑、Docker Compose、Nginx、Tailscale、Cloudflare Tunnel，再加上一些常见问题的处理方法。
+这篇文章所在的仓库不试图替代官方文档，而是记录一条适合个人毕业迁移的路径：旧电脑、Docker Compose、Nginx、Tailscale、Cloudflare Tunnel，再加上一些常见问题的处理方法。
 
-仓库结构大致是：
+仓库结构大致如下：
 
 ```text
 seafile-deploy-manual/
@@ -221,7 +221,7 @@ seafile-deploy-manual/
 └── scripts/
 ```
 
-以后如果有同学也想从学校 Seafile 迁出来，可以先读博客，再按自己的机器和域名改配置。真正长期运行时，最好再补上自动备份、磁盘健康检查和恢复演练。
+如果有同学也想从学校 Seafile 迁出来，可以先读这篇文章，再按自己的机器和域名改配置。真正长期运行时，最好再补上自动备份、磁盘健康检查和恢复演练。
 
 ## 结尾
 
