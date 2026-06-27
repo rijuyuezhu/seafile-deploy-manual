@@ -84,9 +84,9 @@ docker compose --env-file .env up -d
 
 ## 配置 Nginx
 
-Nginx 负责把外部请求转发给本机的 Seafile 容器。这里有一个很容易踩坑的点：如果 Cloudflare Tunnel 到本机 Nginx 使用 HTTP，而 Nginx 又把 HTTP 强制跳转到 HTTPS，就会出现浏览器提示“重定向过多”。
+Nginx 负责把外部请求转发给本机的 Seafile 容器。为了配合 Cloudflare Tunnel，我把公网域名对应的本机入口放在 HTTP 上，也就是让 Tunnel 连接 `http://127.0.0.1`，再由 Nginx 直接反代到 Seafile。
 
-我最后采用的方式是让 Cloudflare Tunnel 连接本机的 HTTP 入口，也就是 `http://127.0.0.1`。这一段只发生在旧电脑本机内部，不经过公网；公网侧的 HTTPS 证书由 Cloudflare 处理。为了让 Seafile 知道用户实际访问的是 HTTPS，Nginx 反代时需要设置 `X-Forwarded-Proto https`。
+这一段只发生在旧电脑本机内部，不经过公网；公网侧的 HTTPS 证书由 Cloudflare 处理。为了让 Seafile 知道用户实际访问的是 HTTPS，Nginx 反代时需要设置 `X-Forwarded-Proto https`。
 
 示例配置如下：
 
@@ -157,7 +157,7 @@ Service Type: HTTP
 Service URL: http://127.0.0.1
 ```
 
-这就是前面 Nginx 配置里不对这个域名做 HTTP 到 HTTPS 跳转的原因。公网用户到 Cloudflare 是 HTTPS，Cloudflare 到 `cloudflared` 是 Tunnel，加密和证书都由 Cloudflare 处理；最后 `cloudflared` 到本机 Nginx 是 localhost HTTP，简单而且不容易遇到本机证书校验问题。
+公网用户到 Cloudflare 是 HTTPS，Cloudflare 到 `cloudflared` 是 Tunnel，最后 `cloudflared` 到本机 Nginx 是 localhost HTTP。这样配置以后，证书和公网入口主要由 Cloudflare 处理，本机 Nginx 只需要稳定地把请求送进 Seafile。
 
 保存后可以从任意网络测试：
 
@@ -167,13 +167,6 @@ curl -I https://cloud.example.com/
 
 正常情况下会看到 Cloudflare 返回的响应头，以及 Seafile 登录页对应的 302 跳转。
 
-如果这里出现 `502 Bad Gateway`，通常是 `cloudflared` 连不上本机 Nginx，或者 origin URL 写错了。可以在旧电脑上看日志：
-
-```bash
-sudo journalctl -u cloudflared -n 100 --no-pager
-```
-
-如果看到“证书不匹配 localhost”之类的错误，说明 Tunnel 被配置成了 HTTPS origin，但本机证书和 `localhost` 对不上。对于这套同机部署，直接使用 `http://127.0.0.1` 会更省事。
 
 ## 从学校 Seafile 迁移数据
 
@@ -193,7 +186,7 @@ WebDAV 地址也要改成新服务器：
 https://cloud.example.com/seafdav/
 ```
 
-未登录时访问 `/seafdav/` 返回 `401 Unauthorized` 通常是正常现象，说明 WebDAV 入口存在，只是在等待认证。真正需要排查的是 404、502 或连接超时。
+这一步完成之后，原来依赖学校 WebDAV 的软件就可以逐个切到新地址。
 
 旧的学校网盘分享链接不会自动迁移。迁移完成后，如果之前给别人发过分享链接，需要在新服务器上重新生成。Seafile 的公开地址也要设置成新的域名，否则新生成的分享链接可能会带错域名。
 
@@ -222,6 +215,21 @@ seafile-deploy-manual/
 ```
 
 如果有同学也想从学校 Seafile 迁出来，可以先读这篇文章，再按自己的机器和域名改配置。真正长期运行时，最好再补上自动备份、磁盘健康检查和恢复演练。
+
+
+## Troubleshooting
+
+部署时最容易遇到的问题通常集中在公网入口这一层。如果 Cloudflare 页面显示 `502 Bad Gateway`，优先确认 Tunnel 的 Public Hostname 是否指向了正确的本机服务，例如 `http://127.0.0.1`，再到旧电脑上看 `cloudflared` 的日志：
+
+```bash
+sudo journalctl -u cloudflared -n 100 --no-pager
+```
+
+如果浏览器提示重定向过多，一般是 Cloudflare Tunnel 访问本机 HTTP，而 Nginx 又把这个 HTTP 请求跳回 HTTPS。对这种同机部署来说，可以让公网域名的 80 server block 直接反代到 Seafile，并在反代头里保留 `X-Forwarded-Proto https`。
+
+如果日志里出现证书和 `localhost` 不匹配，通常是 Tunnel 被配置成了 HTTPS origin，但本机证书并不是签给 `localhost` 的。最简单的处理方式是把 Tunnel origin 改成 `http://127.0.0.1`，让 Cloudflare 负责公网侧 HTTPS，本机只处理 localhost HTTP。
+
+WebDAV 方面，访问 `/seafdav/` 时看到 `401 Unauthorized` 往往是正常的，因为它在等待客户端认证。真正需要继续排查的是 404、502 或连接超时。
 
 ## 结尾
 
