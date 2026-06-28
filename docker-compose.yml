@@ -1,26 +1,50 @@
 services:
   db:
-    image: mariadb:10.11
+    image: ${SEAFILE_DB_IMAGE:-mariadb:10.11}
     container_name: seafile-mysql
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${INIT_SEAFILE_MYSQL_ROOT_PASSWORD}
       MYSQL_LOG_CONSOLE: "true"
+      MARIADB_AUTO_UPGRADE: "1"
     volumes:
       - ./data/mysql:/var/lib/mysql
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "/usr/local/bin/healthcheck.sh",
+          "--connect",
+          "--mariadbupgrade",
+          "--innodb_initialized",
+        ]
+      interval: 20s
+      start_period: 30s
+      timeout: 5s
+      retries: 10
     networks:
       - seafile-net
 
-  memcached:
-    image: memcached:1.6
-    container_name: seafile-memcached
+  redis:
+    image: ${SEAFILE_REDIS_IMAGE:-redis:7}
+    container_name: seafile-redis
     restart: unless-stopped
-    command: memcached -m 256
+    command:
+      - /bin/sh
+      - -c
+      - |
+        if [ -n "$$REDIS_PASSWORD" ]; then
+          redis-server --requirepass "$$REDIS_PASSWORD"
+        else
+          redis-server
+        fi
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
     networks:
       - seafile-net
 
   seafile:
-    image: seafileltd/seafile-mc:latest
+    image: ${SEAFILE_IMAGE:-seafileltd/seafile-mc:13.0-latest}
     container_name: seafile
     restart: unless-stopped
     ports:
@@ -28,16 +52,42 @@ services:
     volumes:
       - ./data/shared:/shared
     environment:
-      DB_HOST: db
-      DB_ROOT_PASSWD: ${MYSQL_ROOT_PASSWORD}
-      TIME_ZONE: ${TIME_ZONE}
+      SEAFILE_MYSQL_DB_HOST: ${SEAFILE_MYSQL_DB_HOST:-db}
+      SEAFILE_MYSQL_DB_PORT: ${SEAFILE_MYSQL_DB_PORT:-3306}
+      SEAFILE_MYSQL_DB_USER: ${SEAFILE_MYSQL_DB_USER:-seafile}
+      SEAFILE_MYSQL_DB_PASSWORD: ${SEAFILE_MYSQL_DB_PASSWORD}
+      INIT_SEAFILE_MYSQL_ROOT_PASSWORD: ${INIT_SEAFILE_MYSQL_ROOT_PASSWORD}
+      SEAFILE_MYSQL_DB_CCNET_DB_NAME: ${SEAFILE_MYSQL_DB_CCNET_DB_NAME:-ccnet_db}
+      SEAFILE_MYSQL_DB_SEAFILE_DB_NAME: ${SEAFILE_MYSQL_DB_SEAFILE_DB_NAME:-seafile_db}
+      SEAFILE_MYSQL_DB_SEAHUB_DB_NAME: ${SEAFILE_MYSQL_DB_SEAHUB_DB_NAME:-seahub_db}
+      TIME_ZONE: ${TIME_ZONE:-Asia/Shanghai}
+      INIT_SEAFILE_ADMIN_EMAIL: ${INIT_SEAFILE_ADMIN_EMAIL:-you@example.com}
+      INIT_SEAFILE_ADMIN_PASSWORD: ${INIT_SEAFILE_ADMIN_PASSWORD}
       SEAFILE_SERVER_HOSTNAME: ${SEAFILE_SERVER_HOSTNAME}
-      SEAFILE_SERVER_PROTOCOL: ${SEAFILE_SERVER_PROTOCOL}
-      SEAFILE_ADMIN_EMAIL: ${SEAFILE_ADMIN_EMAIL}
-      SEAFILE_ADMIN_PASSWORD: ${SEAFILE_ADMIN_PASSWORD}
+      SEAFILE_SERVER_PROTOCOL: ${SEAFILE_SERVER_PROTOCOL:-https}
+      SITE_ROOT: ${SITE_ROOT:-/}
+      NON_ROOT: ${NON_ROOT:-false}
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY}
+      SEAFILE_LOG_TO_STDOUT: ${SEAFILE_LOG_TO_STDOUT:-false}
+      ENABLE_GO_FILESERVER: ${ENABLE_GO_FILESERVER:-true}
+      ENABLE_SEADOC: ${ENABLE_SEADOC:-false}
+      CACHE_PROVIDER: ${CACHE_PROVIDER:-redis}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      ENABLE_NOTIFICATION_SERVER: ${ENABLE_NOTIFICATION_SERVER:-false}
+      MD_FILE_COUNT_LIMIT: ${MD_FILE_COUNT_LIMIT:-100000}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     depends_on:
-      - db
-      - memcached
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
     networks:
       - seafile-net
 

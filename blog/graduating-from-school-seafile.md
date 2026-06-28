@@ -45,7 +45,7 @@ wsl --shutdown
 
 ## 0x01 整体结构
 
-旧电脑上跑 Docker Compose，里面是 Seafile、MariaDB 和 memcached。Seafile 容器只监听本机端口，外部请求统一交给 Nginx。内部访问使用 Tailscale，外部访问使用 Cloudflare Tunnel。这样不需要公网 IP，也不需要在家用路由器上开放端口。
+旧电脑上跑 Docker Compose，里面是 Seafile、MariaDB 和 Redis。Seafile 容器只监听本机端口，外部请求统一交给 Nginx。内部访问使用 Tailscale，外部访问使用 Cloudflare Tunnel。这样不需要公网 IP，也不需要在家用路由器上开放端口。
 
 公网访问路径如下：
 
@@ -99,7 +99,7 @@ chmod 755 "$DEPLOY/data/shared"
 
 | 文件或目录 | 放置位置 | 用途 |
 |---|---|---|
-| `docker-compose.yml` | `/opt/seafile-deploy/docker-compose.yml` | Seafile、MariaDB、memcached 的 Compose 配置 |
+| `docker-compose.yml` | `/opt/seafile-deploy/docker-compose.yml` | Seafile、MariaDB、Redis 的 Compose 配置 |
 | `.env` | `/opt/seafile-deploy/.env` | 域名、协议、数据库密码、管理员账号 |
 | `scripts/` | `/opt/seafile-deploy/scripts/` | 安装、部署、检查脚本 |
 | `nginx/` | `/opt/seafile-deploy/nginx/` | Nginx 模板 |
@@ -127,25 +127,37 @@ vim "$DEPLOY/.env"
 ```env
 SEAFILE_SERVER_HOSTNAME=cloud.example.com
 SEAFILE_SERVER_PROTOCOL=https
-MYSQL_ROOT_PASSWORD=change-me-long-random-password
-SEAFILE_ADMIN_EMAIL=you@example.com
-SEAFILE_ADMIN_PASSWORD=change-me-long-random-password
+JWT_PRIVATE_KEY=change-me-random-string-at-least-32-characters
+INIT_SEAFILE_MYSQL_ROOT_PASSWORD=change-me-long-random-root-password
+SEAFILE_MYSQL_DB_PASSWORD=change-me-long-random-seafile-db-password
+INIT_SEAFILE_ADMIN_EMAIL=you@example.com
+INIT_SEAFILE_ADMIN_PASSWORD=change-me-long-random-admin-password
+CACHE_PROVIDER=redis
 ```
 
-`SEAFILE_SERVER_HOSTNAME` 填将来公开访问的域名。即使用 Tailscale 做内部访问，Seafile 的 canonical URL 也建议先统一成公网域名，分享链接和客户端配置会更清楚。
+`SEAFILE_SERVER_HOSTNAME` 填将来公开访问的域名，只写域名或 IP，不要带 `https://`，也不要带端口。即使用 Tailscale 做内部访问，Seafile 的 canonical URL 也建议先统一成公网域名，分享链接和客户端配置会更清楚。
 
-如果后面改过 `.env` 里的域名或协议，需要重新创建 Seafile 容器让配置生效：
+如果 Seafile 还没有初始化，改 `.env` 后启动即可。如果已经初始化过，域名可能已经写入 `data/shared/seafile/conf/seahub_settings.py`，这时只改 `.env` 并重建容器不一定足够。需要同时检查：
+
+```python
+SERVICE_URL = "https://cloud.example.com"
+FILE_SERVER_ROOT = "https://cloud.example.com/seafhttp"
+```
+
+仓库里也提供了辅助脚本：
 
 ```bash
 export DEPLOY=/opt/seafile-deploy
 cd "$DEPLOY"
-docker compose --env-file .env up -d --force-recreate seafile
+bash scripts/set-seafile-domain.sh --public cloud.example.com
 ```
 
-密码可以用下面的命令生成后填入 `.env`：
+更多细节见 `docs/seafile-url-and-domain.md`。
+
+数据库密码、管理员密码和 `JWT_PRIVATE_KEY` 都应改成自己的随机值。可以用下面的命令生成后填入 `.env`：
 
 ```bash
-openssl rand -base64 32
+openssl rand -base64 48
 ```
 
 ## 0x04 安装 Docker 并启动 Seafile
@@ -298,25 +310,24 @@ tailscale ip -4
 
 最简单的用法是通过 Tailscale SSH 或 Tailscale IP 维护这台机器。这样即使公网入口不可用，也能进入旧电脑查看 Docker、Nginx 和 cloudflared 状态。
 
-如果希望浏览器也通过 Tailscale 直接访问 Seafile，可以准备一个内部域名，例如 `cloud.internal.example.com`，指向旧电脑的 Tailscale IP。这里可以先不做；对多数个人部署来说，Tailscale 作为维护通道已经足够。
-
-仓库里提供了内部 HTTPS 模板：
-
-```text
-/opt/seafile-deploy/nginx/seafile-tailscale-https.conf.example
-```
-
-复制后再修改 server name 和证书路径。这个模板假定你已经准备好了内部域名的 HTTPS 证书；如果没有证书，不要直接启用它，可以继续只把 Tailscale 当维护通道。
+如果希望浏览器也通过 Tailscale 直接访问 Seafile，可以使用 Tailscale Serve，把 tailnet 内的 HTTPS 入口反代到本机 `127.0.0.1:8080`：
 
 ```bash
-export DEPLOY=/opt/seafile-deploy
-sudo cp "$DEPLOY/nginx/seafile-tailscale-https.conf.example" /etc/nginx/conf.d/seafile-internal.conf
-sudo vim /etc/nginx/conf.d/seafile-internal.conf
-sudo nginx -t
-sudo systemctl reload nginx
+sudo tailscale serve --bg --https=443 http://127.0.0.1:8080
+tailscale serve status
 ```
 
-内部浏览访问可以先不做。对多数个人部署来说，Tailscale 先作为维护通道即可，日常客户端访问可以统一走公网域名。
+也可以用仓库脚本：
+
+```bash
+bash scripts/configure-tailscale-serve.sh --target http://127.0.0.1:8080 --https-port 443
+```
+
+如果通过 Tailscale 域名登录 Seahub，记得把 `https://machine.tailnet.ts.net` 加入 `CSRF_TRUSTED_ORIGINS`，把 `machine.tailnet.ts.net` 加入 `ALLOWED_HOSTS`。但分享链接仍建议用公网域名，所以 `SERVICE_URL` 和 `FILE_SERVER_ROOT` 不必改成 Tailscale 域名。
+
+另一种做法是准备内部域名和自备证书，再使用仓库里的 `nginx/seafile-tailscale-https.conf.example`。这个模板假定你已经准备好了内部 HTTPS 证书；没有证书时不要直接启用。
+
+内部浏览访问可以先不做。对多数个人部署来说，Tailscale 先作为维护通道即可，日常客户端访问可以统一走公网域名。详见 `docs/tailscale.md`。
 
 ## 0x08 配置 Cloudflare Tunnel 外部访问
 
@@ -329,15 +340,21 @@ systemctl status cloudflared --no-pager
 sudo systemctl enable --now cloudflared
 ```
 
-然后添加 Public Hostname：
+然后添加 Public Hostname。常见有两种 origin：
 
 ```text
+# 模式 A：经本机 Nginx
 Hostname: cloud.example.com
 Service Type: HTTP
 Service URL: http://127.0.0.1
+
+# 模式 B：直连 Seafile published port
+Hostname: cloud.example.com
+Service Type: HTTP
+Service URL: http://127.0.0.1:8080
 ```
 
-这里的 `cloud.example.com` 要和 `.env` 里的 `SEAFILE_SERVER_HOSTNAME`、Nginx 里的 `server_name` 保持一致。
+如果宿主机 80 端口可用，模式 A 方便集中管理反代头、上传大小和日志。如果在 WSL 中 80 端口被占用，或者不想维护本机 Nginx，可以用模式 B。这里的 `cloud.example.com` 要和 `.env` 里的 `SEAFILE_SERVER_HOSTNAME`、Seahub 里的 `SERVICE_URL` 保持一致。详见 `cloudflare/tunnel.md`。
 
 保存后从外部网络测试：
 
@@ -383,19 +400,19 @@ https://cloud.example.com/seafdav/
 
 ## 0x0A 检查和备份
 
-仓库里提供了一个简单检查脚本：
+仓库里提供了一个检查脚本，支持按入口分开检查：
 
 ```bash
 export DEPLOY=/opt/seafile-deploy
 cd "$DEPLOY"
-bash scripts/check.sh
+
+bash scripts/check.sh local
+bash scripts/check.sh nginx cloud.example.com
+bash scripts/check.sh public https://cloud.example.com
+bash scripts/check.sh tailscale https://machine.tailnet.ts.net
 ```
 
-检查脚本会优先读取 `.env` 里的 `SEAFILE_SERVER_HOSTNAME`。如果临时想用别的 Host 测试，也可以这样运行：
-
-```bash
-HOST=your-domain.example bash scripts/check.sh
-```
+默认 `bash scripts/check.sh` 会执行本机 Docker 和 `127.0.0.1:8080` 检查；公网、Tailscale、Nginx origin 可以按需显式指定，避免在直连 8080 或 WSL 场景中误报本机 Nginx 失败。
 
 备份至少要覆盖两个目录：
 
@@ -408,7 +425,7 @@ HOST=your-domain.example bash scripts/check.sh
 
 ## 0x0B 部署完成后的核对
 
-完成上面的步骤后，可以按这个顺序检查一遍：Seafile 容器处于 running 状态，本机 `127.0.0.1:8080` 能打开，Nginx 的本机 Host 测试返回 Seafile 登录跳转，Cloudflare 公网域名返回同样的登录跳转，`/seafdav/` 返回 401，Tailscale 能进入旧电脑维护。
+完成上面的步骤后，可以按这个顺序检查一遍：Seafile 容器处于 running 状态，本机 `127.0.0.1:8080` 能打开，所选公网入口能返回 Seafile 登录跳转，`/seafdav/` 返回 401，Tailscale 能进入旧电脑维护。如果启用了 Tailscale Serve，也检查 tailnet HTTPS 入口。
 
 对应命令如下：
 
@@ -417,10 +434,16 @@ export DEPLOY=/opt/seafile-deploy
 cd "$DEPLOY"
 docker compose --env-file .env ps
 curl -I http://127.0.0.1:8080/
-curl -I -H 'Host: cloud.example.com' http://127.0.0.1/
 curl -I https://cloud.example.com/
 curl -I https://cloud.example.com/seafdav/
 tailscale status
+tailscale serve status || true
+```
+
+如果使用本机 Nginx，再额外检查：
+
+```bash
+curl -I -H 'Host: cloud.example.com' http://127.0.0.1/
 ```
 
 把命令里的 `cloud.example.com` 换成自己的域名。检查通过后，再开始大规模迁移学校网盘里的资料。
@@ -452,15 +475,17 @@ seafile-deploy-manual/
 sudo journalctl -u cloudflared -n 100 --no-pager
 ```
 
-如果浏览器提示重定向过多，一般是 Cloudflare Tunnel 访问本机 HTTP，而 Nginx 又把这个 HTTP 请求跳回 HTTPS。对同机部署来说，可以让公网域名的 80 server block 直接反代到 Seafile，并在反代头里保留 `X-Forwarded-Proto https`。
+如果浏览器提示重定向过多，一般是 Cloudflare Tunnel 访问本机 HTTP，而 origin 又把这个 HTTP 请求跳回 HTTPS，或者 Seahub 没有识别 `X-Forwarded-Proto=https`。对同机部署来说，可以让公网域名的 80 server block 直接反代到 Seafile，并在反代头里保留 `X-Forwarded-Proto https`。
 
-如果日志里出现证书和 `localhost` 不匹配，通常是 Tunnel 被配置成了 HTTPS origin，但本机证书没有签给 `localhost`。可以把 Tunnel origin 改成 `http://127.0.0.1`，让 Cloudflare 处理公网侧 HTTPS，本机只处理 localhost HTTP。
+如果登录时报 CSRF verification failed，检查 `data/shared/seafile/conf/seahub_settings.py` 里的 `ALLOWED_HOSTS`、`CSRF_TRUSTED_ORIGINS` 和 `SECURE_PROXY_SSL_HEADER`。公网域名和 Tailscale 域名如果都用于登录，都要加入可信来源。
 
-Docker 安装脚本如果下载失败，先分别检查 `https://get.docker.com` 和 `https://download.docker.com/linux/ubuntu/gpg`。这类问题通常是网络、代理或 Docker 软件源访问问题。
+如果日志里出现证书和 `localhost` 不匹配，通常是 Tunnel 被配置成了 HTTPS origin，但本机证书没有签给 `localhost`。可以把 Tunnel origin 改成 `http://127.0.0.1` 或 `http://127.0.0.1:8080`，让 Cloudflare 处理公网侧 HTTPS，本机只处理 localhost HTTP。
+
+Docker 安装脚本如果下载失败，先分别检查 `https://get.docker.com` 和 `https://download.docker.com/linux/ubuntu/gpg`。如果官方源暂时不可用，可以使用脚本的 apt fallback；如果镜像拉取失败，要给 Docker daemon 单独配置代理，而不是只在 shell 里设置代理变量。
 
 如果 `docker info` 报 permission denied，说明当前用户还不能访问 Docker daemon。把用户加入 docker 组后，需要重新登录，或者先用 `newgrp docker` 开一个新的 shell。
 
-WebDAV 方面，访问 `/seafdav/` 时看到 `401 Unauthorized` 往往是正常的，因为它在等待客户端认证。需要继续排查的是 404、502 或连接超时。
+WebDAV 方面，访问 `/seafdav/` 时看到 `401 Unauthorized` 往往是正常的，因为它在等待客户端认证。需要继续排查的是 404、502 或连接超时。更多问题见 `docs/troubleshooting.md`。
 
 ## 0x0E 结尾
 
